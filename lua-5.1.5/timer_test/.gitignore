@@ -1,0 +1,5 @@
+out/
+*.gcda
+*.gcno
+coverage.info
+timer.coverage

@@ -45,7 +45,7 @@ THIS_O= lthis.o
 # -- This =========
 
 # ++ Scheduler ====
-SCHED_O= lscheduler.o
+SCHED_O= lscheduler.o ltimer.o
 # -- Scheduler ====
 
 LUA_A=	liblua.a
