@@ -8,7 +8,6 @@
 -----------------------------------------------------------------------------
 
 local url = require "socket.url"
-local syslog = require "syslog"
 
 module ("xavante.httpd", package.seeall)
 
@@ -64,7 +63,7 @@ end
 
 function errorhandler (msg, skt)
 	msg = tostring(msg)
-	syslog.syslog("LOG_ERR", "  Xavante Error: "..msg)
+	if syslog then syslog.syslog("LOG_ERR", "  Xavante Error: "..msg) end
 	skt:send ("HTTP/1.1 502 Bad Gateway\r\n")
 	skt:send (string.format ("Date: %s\r\n\r\n", os.date ("!%a, %d %b %Y %H:%M:%S GMT")))
 	skt:send (string.format ([[
@@ -81,7 +80,7 @@ function connection (skt)
 	if not res then
 		local res, msg = pcall(errorhandler, msg, skt)
 		if not res then
-			syslog.syslog("LOG_ERR", "Fail to report error: "..tostring(err))
+			if syslog then syslog.syslog("LOG_ERR", "Fail to report error: "..tostring(err)) end
 		end
 	end
 	skt:close()

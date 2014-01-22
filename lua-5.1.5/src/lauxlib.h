@@ -11,6 +11,9 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#ifdef WIN32
+#include <windows.h>
+#endif
 
 #include "lua.h"
 
@@ -37,7 +40,17 @@ typedef struct luaL_Reg {
   lua_CFunction func;
 } luaL_Reg;
 
-
+struct wait_ctx {
+#ifndef WIN32
+  struct epoll_event *event;
+#else
+  OVERLAPPED ov;
+#endif
+  struct timer_list *timer;
+  lua_State *L_thread;
+  int fd;
+  int suspended;
+};
 
 LUALIB_API void (luaI_openlib) (lua_State *L, const char *libname,
                                 const luaL_Reg *l, int nup);
@@ -88,7 +101,11 @@ LUALIB_API const char *(luaL_gsub) (lua_State *L, const char *s, const char *p,
 LUALIB_API const char *(luaL_findtable) (lua_State *L, int idx,
                                          const char *fname, int szhint);
 
+#ifndef WIN32
 LUALIB_API int (luaL_wait) (lua_State *L, int fd, int write, int timeout);
+#else
+LUALIB_API int (luaL_wait) (lua_State *L, int fd, int write, int timeout, struct wait_ctx *ctx);
+#endif
 LUALIB_API int (luaL_addfd) (lua_State *L, int fd);
 LUALIB_API int (luaL_delfd) (lua_State *L, int fd);
 

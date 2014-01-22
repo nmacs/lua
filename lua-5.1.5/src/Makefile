@@ -78,10 +78,10 @@ $(LUA_A): $(CORE_O) $(LIB_O)
 	$(RANLIB) $@
 
 $(LUA_T): $(LUA_O) $(LUA_A)
-	$(CC) -o $@ $(MYLDFLAGS) $(LUA_O) $(LUA_A) $(LIBS) $(CFLAGS)
+	$(CC) -o $@ $(MYLDFLAGS) $(LUA_O) $(LUA_A) $(CFLAGS) $(LIBS)
 
 $(LUAC_T): $(LUAC_O) $(LUA_A)
-	$(CC) -o $@ $(MYLDFLAGS) $(LUAC_O) $(LUA_A) $(LIBS) $(CFLAGS)
+	$(CC) -o $@ $(MYLDFLAGS) $(LUAC_O) $(LUA_A) $(CFLAGS) $(LIBS)
 
 clean:
 	$(RM) $(ALL_T) $(ALL_O)
