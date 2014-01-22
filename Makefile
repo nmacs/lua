@@ -211,6 +211,7 @@ romfs:
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUASEC -d $(LUASEC_DIR)/https.lua /usr/local/share/lua/5.1/ssl/https.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUATWITTER -d $(LUATWITTER_DIR)/twitter.lua /usr/local/share/lua/5.1/twitter.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUATWITTER -d $(LUATWITTER_DIR)/oauth.lua /usr/local/share/lua/5.1/oauth.lua
+	$(ROMFSINST) -d mqueue/mqueue.lua /usr/local/share/lua/5.1/mqueue.lua
 
 repo:
 	$(REPOINST) -e CONFIG_LIB_LUA_SHELL $(LUA_DIR)/src/lua /bin/lua
@@ -231,6 +232,7 @@ repo:
 	$(REPOINST) -e CONFIG_LIB_LUA_LUASEC $(LUASEC_DIR)/https.lua /usr/local/share/lua/5.1/ssl/https.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_LUATWITTER $(LUATWITTER_DIR)/twitter.lua /usr/local/share/lua/5.1/twitter.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_LUATWITTER $(LUATWITTER_DIR)/oauth.lua /usr/local/share/lua/5.1/oauth.lua
+	$(REPOINST) mqueue/mqueue.lua /usr/local/share/lua/5.1/mqueue.lua
 	lua-compile $(CONTENT)
 
 romfs_user:
