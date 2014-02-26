@@ -15,6 +15,9 @@
 
 #include <string.h>
 #include <lauxlib.h>
+#ifdef SOCKET_SCHEDULER
+#include <lscheduler.h>
+#endif
 
 #include "socket.h"
 
