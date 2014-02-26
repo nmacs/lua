@@ -330,11 +330,7 @@ static int do_resume_thread(lua_State *L, lua_State *co, int nargs)
 		lua_xmove(co, L, 1);
 		on_thread_error(L, co, lua_tostring(L, -1));
 	}
-	else {
-		dprint("do_resume_thread 5\n");
-		lua_pushstring(L, "coroutine exited without errors");
-		on_thread_error(L, co, "coroutine exited without errors");
-	}
+
 	return -1;
 }
 
