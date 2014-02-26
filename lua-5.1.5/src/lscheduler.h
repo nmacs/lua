@@ -12,6 +12,7 @@
 #endif
 
 #include "lua.h"
+#include "ltimer.h"
 
 struct wait_ctx {
 #ifndef WIN32
@@ -19,7 +20,9 @@ struct wait_ctx {
 #else
   OVERLAPPED ov;
 #endif
-  struct timer_list *timer;
+  struct timer_list timer;
+  int timeout;
+  int cancel;
   lua_State *L_thread;
   int fd;
   int suspended;

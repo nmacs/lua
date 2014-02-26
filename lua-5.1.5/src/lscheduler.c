@@ -19,7 +19,6 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "lcoco.h"
-#include "ltimer.h"
 
 #define time_after(a,b)  ((long)(b) - (long)(a) < 0)
 #define time_before(a,b) time_after(b, a)
@@ -138,7 +137,6 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 #ifndef WIN32
 	int delfd = 0;
 	struct wait_ctx ctx;
-	struct timer_list timer;
 	struct epoll_event event;
 #endif
 
@@ -151,14 +149,15 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
     }
 #ifndef WIN32
 	if (timeout >= 0) {
-		set_timeout(&timer, timeout, &ctx);
-		ctx.timer = &timer;
+		set_timeout(&ctx.timer, timeout, &ctx);
+		ctx.timeout = timeout;
 	}
 	else
-		ctx.timer = 0;
+		ctx.timeout = 0;
 	ctx.L_thread = L;
 	ctx.fd = fd;
 	ctx.suspended = 0;
+	ctx.cancel = 0;
 
 	if (fd >= 0) {
 		int ret;
@@ -169,15 +168,19 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 		if (ret) {
 			if (errno == ENOENT) {
 				if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event)) {
-				        if (ctx.timer)
-				                del_timer(ctx.timer);
+					if (ctx.timeout) {
+						ctx.timeout = 0;
+						del_timer(&ctx.timer);
+					}
 					return -errno;
 				}
 				delfd = 1;
 			}
 			else {
-			        if (ctx.timer)
-			                del_timer(ctx.timer);
+				if (ctx.timeout) {
+					ctx.timeout = 0;
+					del_timer(&ctx.timer);
+				}
 				return -errno;
 			}
 		}
@@ -208,33 +211,34 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 
 	return status;
 #else
-        struct timer_list timer;
+	ctx->timeout = timeout;
+	if (timeout >= 0) {
+		set_timeout(&ctx->timer, timeout, ctx);
+		ctx->timeout = timeout;
+	}
+	else
+		ctx->timeout = 0;
 
-        if (timeout >= 0) {
-                set_timeout(&timer, timeout, ctx);
-                ctx->timer = &timer;
-        }
-        else
-                ctx->timer = 0;
-        ctx->L_thread = L;
-        ctx->fd = fd;
-        ctx->suspended = 0;
+	ctx->L_thread = L;
+	ctx->fd = fd;
+	ctx->suspended = 0;
+	ctx->cancel = 0;
 
-        lua_pushlightuserdata(L, (void*)&ctx);
-        lua_pushthread(L);
-        lua_settable(L, LUA_REGISTRYINDEX);
-        luaCOCO_settls(L, (unsigned long)&ctx);
+	lua_pushlightuserdata(L, (void*)&ctx);
+	lua_pushthread(L);
+	lua_settable(L, LUA_REGISTRYINDEX);
+	luaCOCO_settls(L, (unsigned long)&ctx);
 
-        dprint("yield: co:%p\n", L);
-        lua_yield(L, 0);
-        dprint("resumed: co:%p\n", L);
-        status = luaL_checkinteger(L, -1);
-        lua_pop(L, 1);
+	dprint("yield: co:%p\n", L);
+	lua_yield(L, 0);
+	dprint("resumed: co:%p\n", L);
+	status = luaL_checkinteger(L, -1);
+	lua_pop(L, 1);
 
-        luaCOCO_settls(L, 0);
-        lua_pushlightuserdata(L, (void*)&ctx);
-        lua_pushnil(L);
-        lua_settable(L, LUA_REGISTRYINDEX);
+	luaCOCO_settls(L, 0);
+	lua_pushlightuserdata(L, (void*)&ctx);
+	lua_pushnil(L);
+	lua_settable(L, LUA_REGISTRYINDEX);
 
 	return status;
 #endif
@@ -248,7 +252,7 @@ static int auxwait(lua_State *L, int fd, int write, int timeout)
 	int ret;
 	struct wait_ctx ctx;
 	memset(&ctx, 0, sizeof(ctx));
-	int ert = luaL_wait(L, fd, write, timeout, &ctx);
+	ret = luaL_wait(L, fd, write, timeout, &ctx);
 #endif
 	if (ret < 0) {
 		lua_pushnil(L);
@@ -341,8 +345,10 @@ static int resume_thread(lua_State *L, struct wait_ctx *ctx, int status)
 	       L, co, ctx, status, ctx->suspended);
 	if (ctx->suspended)
 		return 0;
-	if (ctx->timer)
-	  del_timer(ctx->timer);
+	if (ctx->timeout) {
+		ctx->timeout = 0;
+	  del_timer(&ctx->timer);
+	}
 	lua_pushinteger(L, status);
 	return do_resume_thread(L, co, 1);
 }
@@ -394,7 +400,7 @@ static int l_loop(lua_State *L)
                                   lua_pop(L, 1);
                   }
 		}
-
+	}
 	return 0;
 #else
 	DWORD ret;
@@ -448,7 +454,8 @@ static int l_loop(lua_State *L)
 			process_timers_ex(&timers, &expired, now);
 			list_for_each_safe(&expired, item, tmp) {
 							struct timer_list *timer = container_of(item, struct timer_list, list);
-							dprint("loop: resume on timeout status:0\n");
+							dprint("loop: resume on timeout status:0 ctx:%p co:%p\n",
+										 (struct wait_ctx*)timer->data, ((struct wait_ctx*)timer->data)->L_thread);
 							if (resume_thread(L, (struct wait_ctx*)timer->data, 0))
 											lua_pop(L, 1);
 							dprint("loop: resume on timeout done\n");
@@ -523,26 +530,27 @@ static int suspend_thread(lua_State *L, lua_State *co)
 #ifndef WIN32
 	struct epoll_event event = {0};
 #endif
-	
+
 	if (luaCOCO_gettls(co, (unsigned long*)&ctx))
 		luaL_argcheck(L, 0, 1, "alive c-coroutine expected");
 	
 	dprint("suspend_thread: co:%p, ctx:%p\n", co, ctx);
-	
+
 	if (ctx == NULL || ctx->suspended)
 		return 0;
-	
+
 	ctx->suspended = 1;
-	if (ctx->timer) {
-		dprint("suspend_thread: remove timeout:%p\n", ctx->timer);
-		del_timer(ctx->timer);
+	if (ctx->timeout) {
+		dprint("suspend_thread: remove timeout:%p\n", &ctx->timer);
+		ctx->timeout = 0;
+		del_timer(&ctx->timer);
 	}
-	
+
 #ifndef WIN32
 	if (ctx->fd >= 0)
 		epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ctx->fd, &event);
 #endif
-	
+
 	return 1;
 }
 
@@ -571,8 +579,8 @@ static int l_resume_thread(lua_State *L)
 
 	ctx->suspended = 0;
 
-	if (ctx->timer)
-		add_timer(&timers, ctx->timer);
+	if (ctx->timeout)
+		add_timer(&timers, &ctx->timer);
 
 #ifndef WIN32
 	if (ctx->event) {
@@ -590,6 +598,7 @@ static int l_cancel_wait(lua_State *L)
 {
 	struct wait_ctx *ctx;
 	lua_State *co = lua_tothread(L, 1);
+	dprint("Cancel thread %p\n", co);
 	luaL_argcheck(L, co, 1, "coroutine expected");
 	if (luaCOCO_gettls(co, (unsigned long*)&ctx))
 		luaL_argcheck(L, 0, 1, "alive c-coroutine expected");
@@ -599,9 +608,19 @@ static int l_cancel_wait(lua_State *L)
 		return 1;
 	}
 
+	if (ctx->cancel) {
+		lua_pushboolean(L, 1);
+		return 1;
+	}
+
 	suspend_thread(L, co);
-	lua_pushinteger(L, -1);
-	do_resume_thread(L, co, 1);
+
+	// resume thread with 0 timeout
+	ctx->timeout = 1;
+	ctx->cancel = 1;
+	ctx->suspended = 0;
+	ctx->L_thread = co;
+	set_timeout(&ctx->timer, 0, ctx);
 
 	lua_pushboolean(L, 1);
 	return 1;
