@@ -27,6 +27,8 @@ LNTP_DIR          := lntp
 LUASEC_DIR        := luasec
 LCRYPTO_DIR       := lcrypto
 LUATWITTER_DIR    := LuaTwitter-0.9.2
+SMSPDU_DIR        := smspdu
+LCRON_DIR         := lcron
 
 USE_SCHEDULER     := 1
 
@@ -50,11 +52,11 @@ ifdef CONFIG_LIB_LUA_LUASOCKET
 	ifdef USE_SCHEDULER
 		CFLAGS  += -DSOCKET_SCHEDULER=1
 	endif
+	CFLAGS          += -Wl,-lsocket -Wl,-lmime -L$(CURDIR)/$(LUASOCKET_DIR)/src
+	lua_libs        += luasocket
 	ifdef FOR_WINDOWS
 		CFLAGS      += -Wl,-lws2_32
 	endif
-	CFLAGS          += -Wl,-lsocket -Wl,-lmime -L$(CURDIR)/$(LUASOCKET_DIR)/src
-	lua_libs        += luasocket
 endif
 
 ifdef CONFIG_LIB_LUA_SQLITE
@@ -108,6 +110,16 @@ endif
 ifdef CONFIG_LIB_LUA_LCRYPTO
 	CFLAGS          += -Wl,-llcrypto -L$(CURDIR)/$(LCRYPTO_DIR) -I$(CURDIR)/$(LCRYPTO_DIR)/src $(SSL_CFLAGS)
 	lua_libs        += lcrypto
+endif
+
+ifdef CONFIG_LIB_LUA_SMSPDU
+	CFLAGS          += -Wl,-lsmspdu -L$(CURDIR)/$(SMSPDU_DIR)
+	lua_libs        += smspdu
+endif
+
+ifdef CONFIG_LIB_LUA_CRON
+	CFLAGS          += -Wl,-llcron -L$(CURDIR)/$(LCRON_DIR)
+	lua_libs        += lcron
 endif
 
 .PHONY: all lua repo romfs
@@ -178,6 +190,14 @@ luasec: $(LUASEC_DIR)/Makefile
 lcrypto: $(LCRYPTO_DIR)/Makefile
 	$(MAKE) -C $(LCRYPTO_DIR)
 
+.PHONY: smspdu
+smspdu: $(SMSPDU_DIR)/Makefile
+	$(MAKE) -C $(SMSPDU_DIR)
+	
+.PHONY: lcron
+lcron: $(LCRON_DIR)/Makefile
+	$(MAKE) -C $(LCRON_DIR)
+
 ############################################################################
 
 clean:
@@ -195,8 +215,11 @@ clean:
 	-$(MAKE) -C $(LNTP_DIR) clean
 	-$(MAKE) -C $(LUASEC_DIR) clean
 	-$(MAKE) -C $(LCRYPTO_DIR) clean
+	-$(MAKE) -C $(SMSPDU_DIR) clean
+	-$(MAKE) -C $(LCRON_DIR) clean
 	-rm -rf $(LUA_DIR)-x86
 	-rm -rf $(LUA_DIR)-native
+	-rm -f $(LUA_DIR)/src/autoconf.h
 
 romfs:
 	$(ROMFSINST) -e CONFIG_LIB_LUA_SHELL -d $(LUA_DIR)/src/lua /bin/lua
@@ -217,6 +240,7 @@ romfs:
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUASEC -d $(LUASEC_DIR)/https.lua /usr/local/share/lua/5.1/ssl/https.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUATWITTER -d $(LUATWITTER_DIR)/twitter.lua /usr/local/share/lua/5.1/twitter.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUATWITTER -d $(LUATWITTER_DIR)/oauth.lua /usr/local/share/lua/5.1/oauth.lua
+	$(ROMFSINST) -e CONFIG_LIB_LUA_CRON -d $(LCRON_DIR)/cron.lua /usr/local/share/lua/5.1/cron.lua
 	$(ROMFSINST) -d mqueue/mqueue.lua /usr/local/share/lua/5.1/mqueue.lua
 
 repo:
@@ -238,6 +262,7 @@ repo:
 	$(REPOINST) -e CONFIG_LIB_LUA_LUASEC $(LUASEC_DIR)/https.lua /usr/local/share/lua/5.1/ssl/https.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_LUATWITTER $(LUATWITTER_DIR)/twitter.lua /usr/local/share/lua/5.1/twitter.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_LUATWITTER $(LUATWITTER_DIR)/oauth.lua /usr/local/share/lua/5.1/oauth.lua
+	$(REPOINST) -e CONFIG_LIB_LUA_CRON $(LCRON_DIR)/cron.lua /usr/local/share/lua/5.1/cron.lua
 	$(REPOINST) mqueue/mqueue.lua /usr/local/share/lua/5.1/mqueue.lua
 	lua-compile $(CONTENT)
 

@@ -320,6 +320,7 @@ int socket_accept(p_socket ps, p_socket pa, SA *addr, socklen_t *len,
 
     err = WSAGetLastError();
     if (err != WSA_IO_PENDING) {
+          dprint("accept: error 1\n");
           closesocket(s);
           return err > 0 ? err : IO_UNKNOWN;
     }
@@ -333,11 +334,13 @@ int socket_accept(p_socket ps, p_socket pa, SA *addr, socklen_t *len,
         getsockopt(*ps, SOL_SOCKET, SO_ERROR, (char *)&err, &len);
         /* we KNOW there was an error. if 'why' is 0, we will return
         * "unknown error", but it's not really our fault */
+        dprint("accept: error 2\n");
         closesocket(s);
         return err > 0? err: IO_UNKNOWN;
     }
 
     if (ret == 0) {
+        dprint("accept: error 3\n");
         closesocket(s);
         socket_destroy(ps);
         return IO_TIMEOUT;
@@ -400,8 +403,11 @@ int socket_send(p_socket ps, const char *data, size_t count,
 
     if (WSASend(*ps, &buf, 1, &bytes, 0, (LPWSAOVERLAPPED)&ctx.ov, NULL)) {
           int err = WSAGetLastError();
-          if (err != WSA_IO_PENDING)
+          if (err != WSA_IO_PENDING) {
+                dprint("send: error 1\n");
+                socket_destroy(ps);
                 return err > 0 ? err : IO_UNKNOWN;
+          }
     }
 
     t = (int)(timeout_getretry(tm)*1e3);
@@ -411,9 +417,12 @@ int socket_send(p_socket ps, const char *data, size_t count,
         int err;
         GetOverlappedResult((HANDLE)*ps, &ctx.ov, &bytes, FALSE);
         err = WSAGetLastError();
+        dprint("send: error 2\n");
+        socket_destroy(ps);
         return err > 0 ? err : IO_UNKNOWN;
     }
     if (ret == 0) {
+        dprint("send: error 3\n");
         socket_destroy(ps);
         return IO_TIMEOUT;
     }
@@ -498,8 +507,11 @@ int socket_recv(p_socket ps, char *data, size_t count, size_t *got, p_timeout tm
 
     if (WSARecv(*ps, &buf, 1, &taken, &flags, (LPWSAOVERLAPPED)&ctx.ov, NULL)) {
             err = WSAGetLastError();
-            if (err != WSA_IO_PENDING)
+            if (err != WSA_IO_PENDING) {
+              dprint("recv: error 1 err:%i\n", err);
+              socket_destroy(ps);
               return err > 0 ? err : IO_UNKNOWN;
+            }
     }
 
     t = (int)(timeout_getretry(tm)*1e3);
@@ -510,18 +522,21 @@ int socket_recv(p_socket ps, char *data, size_t count, size_t *got, p_timeout tm
         DWORD bytes;
         GetOverlappedResult((HANDLE)*ps, &ctx.ov, &bytes, FALSE);
         err = WSAGetLastError();
+        dprint("recv: error 2\n");
+        socket_destroy(ps);
         return err > 0 ? err : IO_UNKNOWN;
     }
     if (ret == 0) {
+        dprint("recv: error 3\n");
         socket_destroy(ps);
         return IO_TIMEOUT;
     }
 
     GetOverlappedResult((HANDLE)*ps, &ctx.ov, &taken, FALSE);
+    dprint("recv: taken:%u\n", taken);
     if (taken == 0)
       return IO_CLOSED;
     *got = (size_t)taken;
-    dprint("recv: taken:%u\n", taken);
 
     return IO_DONE;
 #else

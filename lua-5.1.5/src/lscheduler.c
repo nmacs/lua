@@ -1,14 +1,5 @@
 #include <stdlib.h>
 #include <errno.h>
-#ifndef WIN32
-#include <unistd.h>
-#include <sys/epoll.h>
-#include <sys/times.h>
-#include <syslog.h>
-#else
-#include <windows.h>
-#include <time.h>
-#endif
 
 //#define DEBUG 1
 
@@ -23,7 +14,7 @@
 #define lscheduler_c
 #define LUA_LIB
 
-#include "lua.h"
+#include "lscheduler.h"
 
 #include "lauxlib.h"
 #include "lualib.h"
@@ -33,8 +24,15 @@
 #define time_after(a,b)  ((long)(b) - (long)(a) < 0)
 #define time_before(a,b) time_after(b, a)
 
+#define MAXEVENTS 128
+
 static size_t MS_PER_TICK;
+
+#ifndef WIN32
+static int epoll_fd;
+#endif
 static int exit_scheduler;
+static struct timer_context timers;
 
 #if DEBUG
 static void dump_timeouts()
@@ -50,9 +48,7 @@ static void dump_timeouts()
 #define dump_timeouts() while(0) {}
 #endif
 
-#define MAXEVENTS 128
 #ifndef WIN32
-static int epoll_fd;
 static int init_epoll()
 {
 	int ret = epoll_create1(0);
@@ -129,7 +125,7 @@ static void set_timeout(struct timer_list* timer, int timeout, void *data)
 #endif
         dprint("set_timeout: timeout:%i, expire:%lu\n", timeout, expire);
         set_timer(timer, expire, 0, data);
-        add_timer(timer);
+        add_timer(&timers, timer);
 }
 
 #ifndef WIN32
@@ -147,9 +143,13 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 #endif
 
 	dprint("luaL_wait: co:%p, ctx:%p, fd:%i, write:%i, timeout:%i\n", L, &ctx, fd, write, timeout);
-
+    status = lua_pushthread(L);
+    lua_pop(L, 1);
+    if (status == 1) {
+        errno = EINVAL;
+        return -1;
+    }
 #ifndef WIN32
-
 	if (timeout >= 0) {
 		set_timeout(&timer, timeout, &ctx);
 		ctx.timer = &timer;
@@ -169,13 +169,15 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 		if (ret) {
 			if (errno == ENOENT) {
 				if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event)) {
-					del_timer(ctx.timer);
+				        if (ctx.timer)
+				                del_timer(ctx.timer);
 					return -errno;
 				}
 				delfd = 1;
 			}
 			else {
-				del_timer(ctx.timer);
+			        if (ctx.timer)
+			                del_timer(ctx.timer);
 				return -errno;
 			}
 		}
@@ -363,7 +365,7 @@ static int l_loop(lua_State *L)
 		
 		dprint("loop: gettop:%i\n", lua_gettop(L));
 		now = (unsigned long)times(0);
-		timeout = get_next_timeout(now) * MS_PER_TICK;
+		timeout = get_next_timeout(&timers, now) * MS_PER_TICK;
 		dprint("loop: wait for events timeout:%lu\n", timeout);
 		ret = epoll_wait(epoll_fd, events, MAXEVENTS, timeout);
 		dprint("loop: wait ret:%i\n", ret);
@@ -383,14 +385,15 @@ static int l_loop(lua_State *L)
 
 		now = (unsigned long)times(0);
 		//dprint("loop: now:%lu\n", now);
-		list_init(&expired);
-		process_timers_ex(&expired, now);
-		list_for_each_safe(&expired, item, tmp) {
-		        struct timer_list *timer = container_of(item, struct timer_list, list);
-		        if (resume_thread(L, (struct wait_ctx*)timer->data, 0))
-                                lua_pop(L, 1);
+		if (get_next_timeout(&timers, now) == 0) {
+                  list_init(&expired);
+                  process_timers_ex(&timers, &expired, now);
+                  list_for_each_safe(&expired, item, tmp) {
+                          struct timer_list *timer = container_of(item, struct timer_list, list);
+                          if (resume_thread(L, (struct wait_ctx*)timer->data, 0))
+                                  lua_pop(L, 1);
+                  }
 		}
-	}
 
 	return 0;
 #else
@@ -399,58 +402,58 @@ static int l_loop(lua_State *L)
 	ULONG nevents;
 	DWORD bytes;
 	ULONG_PTR key;
-	DWORD err;
+	int err;
 	BOOL r;
+	struct wait_ctx *ctx;
+	int status;
 
 	while (1) {
-                if (exit_scheduler) {
-                        lua_pushfstring(L, "scheduler terminated");
-                        return 1;
-                }
+		if (exit_scheduler) {
+						lua_pushfstring(L, "scheduler terminated");
+						return 1;
+		}
 
-                dprint("loop: gettop:%i\n", lua_gettop(L));
-                now = (unsigned long)clock();
-                timeout = get_next_timeout(now) * MS_PER_TICK;
-                dprint("loop: wait for events timeout:%lu\n", timeout);
-                while ((r = GetQueuedCompletionStatus(iocp, &bytes, &key, &ov, timeout)) && ov != NULL) {
-                    dprint("loop: 1\n");
-                        struct wait_ctx *ctx = (struct wait_ctx *)ov;
-                        dprint("loop: 2 ctx:%p, key:%p\n", ctx, key);
-                        if (!ctx->suspended) {
-                            dprint("loop: 3\n");
-                                int status = GetOverlappedResult((HANDLE)ctx->fd, ov, &bytes, FALSE) ? 1 : -1;
-                                dprint("loop: resume on io status:%i\n", status);
-                                if (resume_thread(L, ctx, status))
-                                        lua_pop(L, 1);
-                                dprint("loop: resume on io done\n");
-                        }
-                        dprint("loop: 4\n");
-                }
-                dprint("loop: 5\n");
+		dprint("loop: gettop:%i\n", lua_gettop(L));
+		now = (unsigned long)clock();
+		timeout = get_next_timeout(&timers, now) * MS_PER_TICK;
+		dprint("loop: wait for events timeout:%lu\n", timeout);
+		while (1) {
+						dprint("loop: 1\n");
+						r = GetQueuedCompletionStatus(iocp, &bytes, &key, &ov, timeout);
+						if (!r && (err = GetLastError()) == WAIT_TIMEOUT)
+								break;
+						if (ov == NULL)
+								break;
+						timeout = 0;
+						ctx = (struct wait_ctx *)ov;
+						dprint("loop: 2 ctx:%p, key:%p\n", ctx, key);
+						if (!ctx->suspended) {
+										dprint("loop: 3\n");
+										status = r ? 1 : -1;
+										dprint("loop: resume on io status:%i\n", status);
+										if (resume_thread(L, ctx, status))
+														lua_pop(L, 1);
+										dprint("loop: resume on io done\n");
+						}
+						dprint("loop: 4\n");
+						ov = 0;
+		}
 
-                if (!r) {
-                        err = GetLastError();
-                        dprint("loop: error:%u\n", err);
-                        if (err != WAIT_TIMEOUT) {
-                                lua_pushfstring(L, "loop error:%d\n", err);
-                                return 1;
-                        }
-                }
+		dprint("loop: check timeouts\n");
 
-                dprint("loop: check timeouts\n");
-
-                now = (unsigned long)clock();
-                //dprint("loop: now:%lu\n", now);
-                list_init(&expired);
-                process_timers_ex(&expired, now);
-                list_for_each_safe(&expired, item, tmp) {
-                        struct timer_list *timer = container_of(item, struct timer_list, list);
-                        dprint("loop: resume on timeout status:0\n");
-                        if (resume_thread(L, (struct wait_ctx*)timer->data, 0))
-                                lua_pop(L, 1);
-                        dprint("loop: resume on timeout done\n");
-                }
-
+		now = (unsigned long)clock();
+		//dprint("loop: now:%lu\n", now);
+		if (get_next_timeout(&timers, now) == 0) {
+			list_init(&expired);
+			process_timers_ex(&timers, &expired, now);
+			list_for_each_safe(&expired, item, tmp) {
+							struct timer_list *timer = container_of(item, struct timer_list, list);
+							dprint("loop: resume on timeout status:0\n");
+							if (resume_thread(L, (struct wait_ctx*)timer->data, 0))
+											lua_pop(L, 1);
+							dprint("loop: resume on timeout done\n");
+			}
+		}
 	}
 	return 0;
 #endif
@@ -569,7 +572,7 @@ static int l_resume_thread(lua_State *L)
 	ctx->suspended = 0;
 
 	if (ctx->timer)
-		add_timer(ctx->timer);
+		add_timer(&timers, ctx->timer);
 
 #ifndef WIN32
 	if (ctx->event) {
@@ -632,12 +635,12 @@ LUALIB_API int luaopen_scheduler (lua_State *L)
 	exit_scheduler = 0;
 #ifndef WIN32
 	MS_PER_TICK = 1000UL / sysconf(_SC_CLK_TCK);
-	init_timers((unsigned long)times(0));
+	init_timers(&timers, (unsigned long)times(0));
 	if (init_epoll())
                 return 0;
 #else
 	MS_PER_TICK = 1000UL / CLOCKS_PER_SEC;
-	init_timers((unsigned long)clock());
+	init_timers(&timers, (unsigned long)clock());
 	if (init_iocp())
 	        return 0;
 #endif

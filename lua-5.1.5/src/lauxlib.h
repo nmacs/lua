@@ -40,17 +40,7 @@ typedef struct luaL_Reg {
   lua_CFunction func;
 } luaL_Reg;
 
-struct wait_ctx {
-#ifndef WIN32
-  struct epoll_event *event;
-#else
-  OVERLAPPED ov;
-#endif
-  struct timer_list *timer;
-  lua_State *L_thread;
-  int fd;
-  int suspended;
-};
+struct wait_ctx;
 
 LUALIB_API void (luaI_openlib) (lua_State *L, const char *libname,
                                 const luaL_Reg *l, int nup);

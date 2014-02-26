@@ -110,7 +110,9 @@ static int os_clock (lua_State *L) {
   lua_pushnumber(L, ((lua_Number)(size_t)times(0)) / CLK_TCK);
   return 1;
 #else
-  return 0;
+  clock_t c = clock();
+  lua_pushnumber(L, ((lua_Number)c) / (lua_Number)CLOCKS_PER_SEC);
+  return 1;
 #endif
 }
 
