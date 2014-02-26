@@ -34,8 +34,12 @@ typedef struct coco_State coco_State;
 #undef luai_userstateresume
 #undef luai_userstateyield
 
-/* Use Windows Fibers (Win98+). */
 #if defined(_WIN32)
+//#define COCO_USE_FIBERS
+#endif
+
+/* Use Windows Fibers (Win98+). */
+#if defined(COCO_USE_FIBERS)
 
 /* Fibers allocate their own stack. The whole Coco state is in front of L. */
 struct coco_State {
@@ -50,7 +54,6 @@ struct coco_State {
 #define LUAI_EXTRASPACE		sizeof(coco_State)
 #define luai_userstateopen(L)	L2COCO(L)->fib = NULL
 #define luai_userstatethread(L,L1)	L2COCO(L1)->fib = NULL
-#define COCO_USE_FIBERS
 
 #else /* !defined(_WIN32) */
 
