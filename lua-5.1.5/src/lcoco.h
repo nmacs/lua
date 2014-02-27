@@ -34,8 +34,8 @@ typedef struct coco_State coco_State;
 #undef luai_userstateresume
 #undef luai_userstateyield
 
-#if defined(_WIN32)
-//#define COCO_USE_FIBERS
+#if defined(_WIN64)
+#define COCO_USE_FIBERS
 #endif
 
 /* Use Windows Fibers (Win98+). */
