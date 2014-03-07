@@ -31,6 +31,7 @@ SMSPDU_DIR        := smspdu
 LCRON_DIR         := lcron
 MQUEUE_DIR        := mqueue
 MESSAGEPACK_DIR   := MessagePack
+LUAEX_DIR         := lua-ex
 
 USE_SCHEDULER     := 1
 
@@ -124,6 +125,11 @@ ifdef CONFIG_LIB_LUA_CRON
 	lua_libs        += lcron
 endif
 
+ifdef CONFIG_LIB_LUA_LUAEX
+	CFLAGS          += -Wl,-lex -L$(CURDIR)/$(LUAEX_DIR)
+	lua_libs        += luaex
+endif
+
 .PHONY: all lua repo romfs
 
 all: lua
@@ -195,10 +201,14 @@ lcrypto: $(LCRYPTO_DIR)/Makefile
 .PHONY: smspdu
 smspdu: $(SMSPDU_DIR)/Makefile
 	$(MAKE) -C $(SMSPDU_DIR)
-	
+
 .PHONY: lcron
 lcron: $(LCRON_DIR)/Makefile
 	$(MAKE) -C $(LCRON_DIR)
+
+.PHONY: luaex
+luaex: $(LUAEX_DIR)/Makefile
+	$(MAKE) -C $(LUAEX_DIR)
 
 ############################################################################
 
@@ -219,6 +229,7 @@ clean:
 	-$(MAKE) -C $(LCRYPTO_DIR) clean
 	-$(MAKE) -C $(SMSPDU_DIR) clean
 	-$(MAKE) -C $(LCRON_DIR) clean
+	-$(MAKE) -C $(LUAEX_DIR) clean
 	-rm -rf $(LUA_DIR)-x86
 	-rm -rf $(LUA_DIR)-native
 	-rm -f $(LUA_DIR)/src/autoconf.h
@@ -238,6 +249,7 @@ romfs:
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUAXAVANTE -d $(LUAXAVANTE_DIR)/src/xavante /usr/local/share/lua/5.1/xavante
 	$(ROMFSINST) -e CONFIG_LIB_LUA_JSON -d $(JSON_DIR)/json/json.lua /usr/local/share/lua/5.1/json.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_JSON -d $(JSON_DIR)/json/jsonrpc.lua /usr/local/share/lua/5.1/jsonrpc.lua
+	$(ROMFSINST) -e CONFIG_LIB_LUA_JSON -d $(JSON_DIR)/json/rpc.lua /usr/local/share/lua/5.1/json/rpc.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUASEC -d $(LUASEC_DIR)/ssl.lua /usr/local/share/lua/5.1/ssl.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUASEC -d $(LUASEC_DIR)/https.lua /usr/local/share/lua/5.1/ssl/https.lua
 	$(ROMFSINST) -e CONFIG_LIB_LUA_LUATWITTER -d $(LUATWITTER_DIR)/twitter.lua /usr/local/share/lua/5.1/twitter.lua
@@ -261,6 +273,7 @@ repo:
 	$(REPOINST) -e CONFIG_LIB_LUA_LUAXAVANTE $(LUAXAVANTE_DIR)/src/xavante /usr/local/share/lua/5.1/xavante
 	$(REPOINST) -e CONFIG_LIB_LUA_JSON $(JSON_DIR)/json/json.lua /usr/local/share/lua/5.1/json.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_JSON $(JSON_DIR)/json/jsonrpc.lua /usr/local/share/lua/5.1/jsonrpc.lua
+	$(REPOINST) -e CONFIG_LIB_LUA_JSON -d $(JSON_DIR)/json/rpc.lua /usr/local/share/lua/5.1/json/rpc.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_LUASEC $(LUASEC_DIR)/ssl.lua /usr/local/share/lua/5.1/ssl.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_LUASEC $(LUASEC_DIR)/https.lua /usr/local/share/lua/5.1/ssl/https.lua
 	$(REPOINST) -e CONFIG_LIB_LUA_LUATWITTER $(LUATWITTER_DIR)/twitter.lua /usr/local/share/lua/5.1/twitter.lua

@@ -91,3 +91,7 @@ config LIB_LUA_SMSPDU
 config LIB_LUA_CRON
 	bool "Lua cron"
 	depends on LIB_LUA
+
+config LIB_LUA_LUAEX
+	bool "Lua extension library"
+	depends on LIB_LUA

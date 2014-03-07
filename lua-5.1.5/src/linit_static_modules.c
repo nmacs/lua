@@ -77,6 +77,10 @@ int luaopen_smspdu(lua_State *L);
 int luaopen_cron(lua_State *L);
 #endif
 
+#ifdef CONFIG_LIB_LUA_LUAEX
+int luaopen_ex(lua_State *L);
+#endif
+
 static const luaL_Reg modules[] = {
 #ifdef CONFIG_LIB_LUA_LUAFILESYSTEM
   {"lfs", luaopen_lfs},
@@ -120,7 +124,10 @@ static const luaL_Reg modules[] = {
 	{"smspdu", luaopen_smspdu},
 #endif
 #ifdef CONFIG_LIB_LUA_CRON
-        {"cron.core", luaopen_cron},
+	{"cron.core", luaopen_cron},
+#endif
+#ifdef CONFIG_LIB_LUA_LUAEX
+	{"ex", luaopen_ex},
 #endif
 	{NULL, NULL}
 };
