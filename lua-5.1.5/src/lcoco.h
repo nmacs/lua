@@ -18,10 +18,6 @@ LUAI_FUNC int luaCOCO_resume(lua_State *L, int nargs);
 LUAI_FUNC int luaCOCO_yield(lua_State *L);
 LUAI_FUNC int luaCOCO_cstacksize(int cstacksize);
 
-/* Thread Local Storage routines */
-LUA_API int luaCOCO_gettls(lua_State *L, unsigned long *value);
-LUA_API int luaCOCO_settls(lua_State *L, unsigned long value);
-
 /* Forward declaration. */
 typedef struct coco_State coco_State;
 

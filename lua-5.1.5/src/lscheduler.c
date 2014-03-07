@@ -19,6 +19,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "lcoco.h"
+#include <string.h>
 
 #define time_after(a,b)  ((long)(b) - (long)(a) < 0)
 #define time_before(a,b) time_after(b, a)
@@ -127,6 +128,123 @@ static void set_timeout(struct timer_list* timer, int timeout, void *data)
         add_timer(&timers, timer);
 }
 
+static int beginwait(lua_State *L, int fd, int write, int timeout, struct wait_ctx *ctx)
+{
+  int status;
+
+  dprint("luaL_wait: co:%p, ctx:%p, fd:%i, write:%i, timeout:%i\n", L, &ctx, fd, write, timeout);
+  status = lua_pushthread(L);
+  lua_pop(L, 1);
+  if (status == 1) {
+    errno = EINVAL;
+    return -1;
+  }
+#ifndef WIN32
+  if (timeout >= 0) {
+          set_timeout(&ctx->timer, timeout, ctx);
+          ctx->timeout = timeout;
+  }
+  else
+          ctx->timeout = 0;
+  ctx->L_thread = L;
+  ctx->fd = fd;
+  ctx->suspended = 0;
+  ctx->cancel = 0;
+  ctx->delfd = 0;
+
+  if (fd >= 0) {
+          int ret;
+          ctx->event.events = write ? EPOLLOUT : EPOLLIN;
+          ctx->event.data.ptr = ctx;
+          ret = epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ctx->event);
+          if (ret) {
+                  if (errno == ENOENT) {
+                          if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ctx->event)) {
+                                  if (ctx->timeout) {
+                                          ctx->timeout = 0;
+                                          del_timer(&ctx->timer);
+                                  }
+                                  return -errno;
+                          }
+                          ctx->delfd = 1;
+                  }
+                  else {
+                          if (ctx->timeout) {
+                                  ctx->timeout = 0;
+                                  del_timer(&ctx->timer);
+                          }
+                          return -errno;
+                  }
+          }
+  }
+
+  luaL_settls(L, (unsigned long)&ctx);
+
+  dprint("beginwait yield: co:%p\n", L);
+  return lua_yield(L, 0);
+#else
+  ctx->timeout = timeout;
+  if (timeout >= 0) {
+          set_timeout(&ctx->timer, timeout, ctx);
+          ctx->timeout = timeout;
+  }
+  else
+          ctx->timeout = 0;
+
+  ctx->L_thread = L;
+  ctx->fd = fd;
+  ctx->suspended = 0;
+  ctx->cancel = 0;
+
+  lua_pushlightuserdata(L, (void*)&ctx);
+  lua_pushthread(L);
+  lua_settable(L, LUA_REGISTRYINDEX);
+  luaL_settls(L, (unsigned long)&ctx);
+
+  dprint("beginwait yield: co:%p\n", L);
+  return lua_yield(L, 0);
+
+#endif
+}
+
+static void endwait(lua_State *L, struct wait_ctx *ctx)
+{
+  luaL_settls(L, 0);
+
+#ifndef _WIN32
+  if (ctx->delfd) {
+          struct epoll_event event = {0};
+          epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ctx->fd, &event);
+  }
+#else
+  (void)ctx;
+#endif
+}
+
+LUALIB_API int l_newwaitctx(lua_State *L)
+{
+  struct wait_ctx *ctx = (struct wait_ctx*)lua_newuserdata(L, sizeof(struct wait_ctx));
+  memset(ctx, 0, sizeof(struct wait_ctx));
+  return 1;
+}
+
+LUALIB_API int l_beginwait(lua_State *L)
+{
+  int fd = luaL_optinteger(L, 1, -1);
+  static const char* operations[] = {"read", "write", NULL};
+  int op = luaL_checkoption(L, 2, "read", operations);
+  int timeout = luaL_optinteger(L, 3, -1);
+  struct wait_ctx *ctx = (struct wait_ctx*)lua_touserdata(L, 4);
+  return beginwait(L, fd, op, timeout, ctx);
+}
+
+LUALIB_API int l_endwait(lua_State *L)
+{
+  struct wait_ctx *ctx = (struct wait_ctx*)lua_touserdata(L, 1);
+  endwait(L, ctx);
+  return 0;
+}
+
 #ifndef WIN32
 LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout)
 #else
@@ -135,9 +253,7 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 {
         int status;
 #ifndef WIN32
-	int delfd = 0;
 	struct wait_ctx ctx;
-	struct epoll_event event;
 #endif
 
 	dprint("luaL_wait: co:%p, ctx:%p, fd:%i, write:%i, timeout:%i\n", L, &ctx, fd, write, timeout);
@@ -161,20 +277,19 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 
 	if (fd >= 0) {
 		int ret;
-		event.events = write ? EPOLLOUT : EPOLLIN;
-		event.data.ptr = &ctx;
-		ctx.event = &event;
-		ret = epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &event);
+		ctx.event.events = write ? EPOLLOUT : EPOLLIN;
+		ctx.event.data.ptr = &ctx;
+		ret = epoll_ctl(epoll_fd, EPOLL_CTL_MOD, ctx.fd, &ctx.event);
 		if (ret) {
 			if (errno == ENOENT) {
-				if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event)) {
+				if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ctx.fd, &ctx.event)) {
 					if (ctx.timeout) {
 						ctx.timeout = 0;
 						del_timer(&ctx.timer);
 					}
 					return -errno;
 				}
-				delfd = 1;
+				ctx.delfd = 1;
 			}
 			else {
 				if (ctx.timeout) {
@@ -185,13 +300,11 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 			}
 		}
 	}
-	else
-		ctx.event = NULL;
 	
 	lua_pushlightuserdata(L, (void*)&ctx);
 	lua_pushthread(L);
 	lua_settable(L, LUA_REGISTRYINDEX);
-	luaCOCO_settls(L, (unsigned long)&ctx);
+	luaL_settls(L, (unsigned long)&ctx);
 
 	dprint("yield: co:%p\n", L);
 	lua_yield(L, 0);
@@ -199,14 +312,14 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 	status = luaL_checkinteger(L, -1);
 	lua_pop(L, 1);
 	
-	luaCOCO_settls(L, 0);
+	luaL_settls(L, 0);
 	lua_pushlightuserdata(L, (void*)&ctx);
 	lua_pushnil(L);
 	lua_settable(L, LUA_REGISTRYINDEX);
 
-	if (delfd) {
+	if (ctx.delfd) {
 		struct epoll_event event = {0};
-		epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, &event);
+		epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ctx.fd, &event);
 	}
 
 	return status;
@@ -227,7 +340,7 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 	lua_pushlightuserdata(L, (void*)&ctx);
 	lua_pushthread(L);
 	lua_settable(L, LUA_REGISTRYINDEX);
-	luaCOCO_settls(L, (unsigned long)&ctx);
+	luaL_settls(L, (unsigned long)&ctx);
 
 	dprint("yield: co:%p\n", L);
 	lua_yield(L, 0);
@@ -235,7 +348,7 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 	status = luaL_checkinteger(L, -1);
 	lua_pop(L, 1);
 
-	luaCOCO_settls(L, 0);
+	luaL_settls(L, 0);
 	lua_pushlightuserdata(L, (void*)&ctx);
 	lua_pushnil(L);
 	lua_settable(L, LUA_REGISTRYINDEX);
@@ -257,7 +370,7 @@ static int auxwait(lua_State *L, int fd, int write, int timeout)
 	if (ret < 0) {
 		lua_pushnil(L);
 		lua_pushstring(L, "error");
-		lua_pushfstring(L, "wait error: %d", ret);
+		lua_pushfstring(L, "wait error: %d", -ret);
 		return 3;
 	}
 	else if (ret == 0) {
@@ -267,9 +380,7 @@ static int auxwait(lua_State *L, int fd, int write, int timeout)
 	}
 
 	lua_pushboolean(L, 1);
-	lua_pushfstring(L, "status:%d", ret);
-
-	return 2;
+	return 1;
 }
 
 LUALIB_API int luaL_addfd(lua_State *L, int fd)
@@ -527,8 +638,7 @@ static int suspend_thread(lua_State *L, lua_State *co)
 	struct epoll_event event = {0};
 #endif
 
-	if (luaCOCO_gettls(co, (unsigned long*)&ctx))
-		luaL_argcheck(L, 0, 1, "alive c-coroutine expected");
+	ctx = (struct wait_ctx*)luaL_gettls(co);
 	
 	dprint("suspend_thread: co:%p, ctx:%p\n", co, ctx);
 
@@ -565,8 +675,7 @@ static int l_resume_thread(lua_State *L)
 	struct wait_ctx *ctx;
 	lua_State *co = lua_tothread(L, 1);
 	luaL_argcheck(L, co, 1, "coroutine expected");
-	if (luaCOCO_gettls(co, (unsigned long*)&ctx))
-		luaL_argcheck(L, 0, 1, "alive c-coroutine expected");
+	ctx = (struct wait_ctx*)luaL_gettls(co);
 
 	if (ctx == NULL || !ctx->suspended) {
 		lua_pushboolean(L, 0);
@@ -579,8 +688,8 @@ static int l_resume_thread(lua_State *L)
 		add_timer(&timers, &ctx->timer);
 
 #ifndef WIN32
-	if (ctx->event) {
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ctx->fd, ctx->event)) {
+	if (ctx->fd >= 0) {
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ctx->fd, &ctx->event)) {
 			luaL_error(L, "epoll_clt error:%d", errno);
 		}
 	}
@@ -596,8 +705,7 @@ static int l_cancel_wait(lua_State *L)
 	lua_State *co = lua_tothread(L, 1);
 	dprint("Cancel thread %p\n", co);
 	luaL_argcheck(L, co, 1, "coroutine expected");
-	if (luaCOCO_gettls(co, (unsigned long*)&ctx))
-		luaL_argcheck(L, 0, 1, "alive c-coroutine expected");
+	ctx = (struct wait_ctx*)luaL_gettls(co);
 
 	if (ctx == NULL) {
 		lua_pushboolean(L, 0);
@@ -638,6 +746,9 @@ static const luaL_Reg lib[] = {
 	{"delfd",  l_delfd},
 	{"suspend_thread", l_suspend_thread},
 	{"resume_thread",  l_resume_thread},
+	{"beginwait", l_beginwait},
+	{"endwait", l_endwait},
+	{"newwaitctx", l_newwaitctx},
 	{"exit", l_exit},
   {NULL, NULL}
 };

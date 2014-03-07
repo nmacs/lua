@@ -3,8 +3,22 @@ local table = require("table")
 local socket = require("socket")
 local coroutine = require("coroutine")
 local scheduler = require("scheduler")
+local string = require("string")
 
 module("socket.cosocket")
+
+local function do_wait(fd, op, timeout)
+	local ctx = scheduler.newwaitctx()
+	local ret = scheduler.beginwait(fd, op, timeout, ctx)
+	scheduler.endwait()
+	if ret < 0 then
+		return nil, "error", -ret
+	elseif ret == 0 then
+		return nil, "timeout"
+	end
+	
+	return true
+end
 
 -----------------------------------------------------------------------------
 -- socket.tcp() wrapper for the coroutine dispatcher
@@ -45,7 +59,7 @@ function cowrap(tcp, error)
                 return result, error, first 
               else
                 -- return control to scheduler and tell it we want to send
-                local ret, err = scheduler.wait(tcp:getfd(), "write", timeout)
+                local ret, err = do_wait(tcp:getfd(), "write", timeout)
                 if not ret then
                     return nil, err
                 end
@@ -67,7 +81,7 @@ function cowrap(tcp, error)
                 return value, error, partial
             else
                 -- return control to dispatcher and tell it we want to receive
-                local ret, err = scheduler.wait(tcp:getfd(), "read", timeout)
+                local ret, err = do_wait(tcp:getfd(), "read", timeout)
                 if not ret then
                     return nil, err
                 end
@@ -80,7 +94,7 @@ function cowrap(tcp, error)
         if error == "timeout" then
             -- return control to dispatcher. we will be writable when
             -- connection succeeds.
-            local ret, err = scheduler.wait(tcp:getfd(), "write", timeout)
+            local ret, err = do_wait(tcp:getfd(), "write", timeout)
             if not ret then
                 return nil, err
             end
@@ -97,7 +111,7 @@ function cowrap(tcp, error)
         while 1 do
             -- return control to dispatcher. we will be readable when a
             -- connection arrives.
-            local ret, err = scheduler.wait(tcp:getfd(), "read")
+            local ret, err = do_wait(tcp:getfd(), "read")
             if not ret then
                 return nil, err
             end

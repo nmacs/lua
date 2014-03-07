@@ -16,9 +16,10 @@
 
 struct wait_ctx {
 #ifndef WIN32
-  struct epoll_event *event;
+  struct epoll_event event;
+  int delfd;
 #else
-  OVERLAPPED ov;
+  OVERLAPPED ov; // Must be the first member!!!
 #endif
   struct timer_list timer;
   int timeout;

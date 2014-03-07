@@ -182,6 +182,11 @@ LUALIB_API void (luaL_pushresult) (luaL_Buffer *B);
 
 #define luaL_reg	luaL_Reg
 
+/* TLS system */
+
+LUALIB_API unsigned long luaL_gettls (lua_State *L);
+LUALIB_API void luaL_settls (lua_State *L, unsigned long tls);
+
 #endif
 
 
