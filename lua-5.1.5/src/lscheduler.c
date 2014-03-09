@@ -50,7 +50,7 @@ static void dump_timeouts()
 #ifndef WIN32
 static int init_epoll()
 {
-	int ret = epoll_create1(0);
+	int ret = epoll_create1(EPOLL_CLOEXEC);
 	if (ret < 0)
 		return ret;
 	epoll_fd = ret;

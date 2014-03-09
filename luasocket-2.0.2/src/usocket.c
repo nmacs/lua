@@ -10,8 +10,18 @@
 \*=========================================================================*/
 #include <string.h> 
 #include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "socket.h"
+
+static int closeonexec(int d)
+{
+  int fl = fcntl(d, F_GETFD);
+  if (fl != -1)
+    fl = fcntl(d, F_SETFD, fl | FD_CLOEXEC);
+  return fl;
+}
 
 /*-------------------------------------------------------------------------*\
 * Wait for readable/writable/connected socket with timeout
@@ -135,6 +145,7 @@ int socket_select(t_socket n, fd_set *rfds, fd_set *wfds, fd_set *efds,
 \*-------------------------------------------------------------------------*/
 int socket_create(p_socket ps, int domain, int type, int protocol) {
     *ps = socket(domain, type, protocol);
+    closeonexec(*ps);
     if (*ps != SOCKET_INVALID) return IO_DONE; 
     else return errno; 
 }
@@ -203,7 +214,10 @@ int socket_accept(p_socket ps, p_socket pa, SA *addr, socklen_t *len, p_timeout 
     if (!len) len = &dlen;
     for ( ;; ) {
         int err;
-        if ((*pa = accept(*ps, addr, len)) != SOCKET_INVALID) return IO_DONE;
+        if ((*pa = accept(*ps, addr, len)) != SOCKET_INVALID) {
+            closeonexec(*pa);
+            return IO_DONE;
+        }
         err = errno;
         if (err == EINTR) continue;
         if (err != EAGAIN && err != ECONNABORTED) return err;
