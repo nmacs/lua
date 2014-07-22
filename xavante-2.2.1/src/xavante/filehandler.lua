@@ -97,7 +97,7 @@ local function in_base(path)
 end
 
 -- main handler
-local function filehandler (req, res, baseDir)
+local function filehandler (req, res, baseDir, flags)
 
 	if req.cmd_mth ~= "GET" and req.cmd_mth ~= "HEAD" then
 		return xavante.httpd.err_405 (req, res)
@@ -111,7 +111,11 @@ local function filehandler (req, res, baseDir)
 	
 	res.headers ["Content-Type"] = mimefrompath (path)
 	res.headers ["Content-Encoding"] = encodingfrompath (path)
-    
+	
+	if flags and flags.download then
+		res.headers ["Content-Disposition"] = "attachment; filename="..req.relpath
+	end
+
 	local attr = lfs.attributes (path)
 	if not attr then
 		return xavante.httpd.err_404 (req, res)
@@ -166,9 +170,9 @@ local function filehandler (req, res, baseDir)
 end
 
 
-function xavante.filehandler (baseDir)
+function xavante.filehandler (baseDir, flags)
 	if type(baseDir) == "table" then baseDir = baseDir.baseDir end
 	return function (req, res)
-		return filehandler (req, res, baseDir)
+		return filehandler (req, res, baseDir, flags)
 	end
 end
