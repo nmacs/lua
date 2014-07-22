@@ -67,7 +67,7 @@ typedef enum
     ET_BINARY,
     /* floating point number of up to sizeof(lua_Number) * CHAR_BIT bits */
     ET_FLOAT,
-} ELEMENT_TYPE;
+} BS_ELEMENT_TYPE;
 
 /* 
  * type tokens 
@@ -150,7 +150,7 @@ typedef struct
 {
     /* the size is in bits for integers and bytes for binary strings */
     size_t size;
-    ELEMENT_TYPE type;
+    BS_ELEMENT_TYPE type;
     ELEMENT_ENDIANESS endianess;
 } ELEMENT_DESCRIPTION;
 
@@ -1185,18 +1185,18 @@ static int compare_token(const char *keyword, const char *token, size_t len)
  *      token - token obtained from parsing the format string
  *      token_len - length of the token
  */
-static ELEMENT_TYPE totype(lua_State *l, const char *token, size_t token_len)
+static BS_ELEMENT_TYPE totype(lua_State *l, const char *token, size_t token_len)
 {
     int i = 1;
     while(TYPES[i])
     {
         if(compare_token(TYPES[i], token, token_len))
         {
-            return (ELEMENT_TYPE)i;
+            return (BS_ELEMENT_TYPE)i;
         } 
         ++i;
     }
-    return (ELEMENT_TYPE)luaL_error(l, "wrong format: unexpected type token (%s)", token); 
+    return (BS_ELEMENT_TYPE)luaL_error(l, "wrong format: unexpected type token (%s)", token); 
 }
 
 /*
@@ -1477,9 +1477,12 @@ static void parse(lua_State *l, ELEM_HANDLER handler, void *arg)
 #ifdef WIN32
         _snprintf_s(
 #else
-		snprintf(
+        snprintf(
 #endif
-			message, sizeof(message), 
+                message, sizeof(message), 
+#ifdef WIN32
+                _TRUNCATE,
+#endif
                 "bitstring.bitmatch or string expected, got %s",
                 lua_typename(l, lua_type(l, 1)));
         message[sizeof(message) - 1] = '\0';
@@ -1794,7 +1797,7 @@ static void init_bitmatch_type(lua_State *l)
  *      number of return values
  */
 #ifdef WIN32
-extern "C" __declspec(dllexport) int luaopen_bitstring(lua_State *l) 
+/*extern "C" __declspec(dllexport)*/ int luaopen_bitstring(lua_State *l) 
 #else
 int luaopen_bitstring(lua_State *l) 
 #endif
