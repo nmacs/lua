@@ -652,12 +652,12 @@ LUALIB_API lua_State *luaL_newstate (void) {
 
 #include "lstate.h"
 
-LUALIB_API unsigned long luaL_gettls (lua_State *L)
+LUALIB_API void* luaL_gettls (lua_State *L)
 {
     return L->tls;
 }
 
-LUALIB_API void luaL_settls (lua_State *L, unsigned long tls)
+LUALIB_API void luaL_settls (lua_State *L, void* tls)
 {
     L->tls = tls;
 }

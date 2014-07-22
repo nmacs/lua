@@ -178,7 +178,7 @@ static int beginwait(lua_State *L, int fd, int write, int timeout, struct wait_c
           }
   }
 
-  luaL_settls(L, (unsigned long)&ctx);
+  luaL_settls(L, &ctx);
 
   dprint("beginwait yield: co:%p\n", L);
   return lua_yield(L, 0);
@@ -199,7 +199,7 @@ static int beginwait(lua_State *L, int fd, int write, int timeout, struct wait_c
   lua_pushlightuserdata(L, (void*)&ctx);
   lua_pushthread(L);
   lua_settable(L, LUA_REGISTRYINDEX);
-  luaL_settls(L, (unsigned long)&ctx);
+  luaL_settls(L, &ctx);
 
   dprint("beginwait yield: co:%p\n", L);
   return lua_yield(L, 0);
@@ -304,7 +304,7 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 	lua_pushlightuserdata(L, (void*)&ctx);
 	lua_pushthread(L);
 	lua_settable(L, LUA_REGISTRYINDEX);
-	luaL_settls(L, (unsigned long)&ctx);
+	luaL_settls(L, &ctx);
 
 	dprint("yield: co:%p\n", L);
 	lua_yield(L, 0);
@@ -322,7 +322,7 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 		epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ctx.fd, &event);
 	}
 
-	return status;
+	return ctx.cancel ? -1 : status;
 #else
 	ctx->timeout = timeout;
 	if (timeout >= 0) {
@@ -340,7 +340,7 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 	lua_pushlightuserdata(L, (void*)&ctx);
 	lua_pushthread(L);
 	lua_settable(L, LUA_REGISTRYINDEX);
-	luaL_settls(L, (unsigned long)&ctx);
+	luaL_settls(L, &ctx);
 
 	dprint("yield: co:%p\n", L);
 	lua_yield(L, 0);
@@ -353,7 +353,7 @@ LUALIB_API int luaL_wait(lua_State *L, int fd, int write, int timeout, struct wa
 	lua_pushnil(L);
 	lua_settable(L, LUA_REGISTRYINDEX);
 
-	return status;
+	return ctx->cancel ? -1 : status;
 #endif
 }
 
@@ -392,7 +392,7 @@ LUALIB_API int luaL_addfd(lua_State *L, int fd)
 	}
 	return 0;
 #else
-	CreateIoCompletionPort((HANDLE)fd, iocp, (ULONG_PTR)7, 0);
+	CreateIoCompletionPort((HANDLE)(intptr_t)fd, iocp, (ULONG_PTR)7, 0);
 	return 0;
 #endif
 }
