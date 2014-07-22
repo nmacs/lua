@@ -21,6 +21,11 @@
 
 #include "socket.h"
 
+static int make_not_inheritable(SOCKET s)
+{
+  return SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0) ? 0 : -1;
+}
+
 //#define DEBUG 1
 
 #if DEBUG
@@ -30,7 +35,6 @@
 #else
 #  define dprint(...) while(0) {}
 #endif
-
 
 #ifdef SOCKET_SCHEDULER
 static void *
@@ -200,6 +204,7 @@ void socket_shutdown(p_socket ps, int how) {
 \*-------------------------------------------------------------------------*/
 int socket_create(p_socket ps, int domain, int type, int protocol) {
     *ps = socket(domain, type, protocol);
+    make_not_inheritable(*ps);
     if (*ps != SOCKET_INVALID) return IO_DONE;
     else return WSAGetLastError();
 }
@@ -214,6 +219,7 @@ int socket_connect(p_socket ps, SA *addr, socklen_t len, p_timeout tm) {
   struct wait_ctx ctx;
   int t;
   int ret;
+  struct sockaddr_in bind_addr;
 #endif
   int err;
   /* don't call on closed socket */
@@ -222,6 +228,16 @@ int socket_connect(p_socket ps, SA *addr, socklen_t len, p_timeout tm) {
   L = lua_this();
   luaL_addfd(L, *ps);
   memset(&ctx, 0, sizeof(ctx));
+
+  bind_addr.sin_family = AF_INET;
+  bind_addr.sin_addr.s_addr = INADDR_ANY;
+  bind_addr.sin_port = 0;
+  if (bind(*ps, (SOCKADDR *) &bind_addr, sizeof (bind_addr)))
+  {
+    err = WSAGetLastError();
+    return err > 0 ? err: IO_UNKNOWN;
+  }
+
   dprint("connect ov:%p\n", &ctx.ov);
   if (!ext.ConnectEx(*ps, addr, len, NULL, 0, NULL, &ctx.ov)) {
       err = WSAGetLastError();
@@ -352,6 +368,7 @@ int socket_accept(p_socket ps, p_socket pa, SA *addr, socklen_t *len,
     setsockopt( s, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (char *)ps, sizeof(*ps) );
 
     dprint("accept OK\n");
+    make_not_inheritable(s);
     *pa = s;
 
     return IO_DONE;
@@ -467,6 +484,55 @@ int socket_send(p_socket ps, const char *data, size_t count,
 int socket_sendto(p_socket ps, const char *data, size_t count, size_t *sent, 
         SA *addr, socklen_t len, p_timeout tm)
 {
+#ifdef SOCKET_SCHEDULER
+    DWORD bytes;
+    WSABUF buf;
+    int ret, t;
+    struct wait_ctx ctx;
+    lua_State *L = lua_this();
+
+    *sent = 0;
+    if (*ps == SOCKET_INVALID) return IO_CLOSED;
+
+    luaL_addfd(L, *ps);
+
+    buf.buf = (char*)data;
+    buf.len = count;
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    if (WSASendTo(*ps, &buf, 1, &bytes, 0, addr, len, (LPWSAOVERLAPPED)&ctx.ov, NULL)) {
+          int err = WSAGetLastError();
+          if (err != WSA_IO_PENDING) {
+                dprint("sendto: error 1\n");
+                socket_destroy(ps);
+                return err > 0 ? err : IO_UNKNOWN;
+          }
+    }
+
+    t = (int)(timeout_getretry(tm)*1e3);
+    ret = luaL_wait(L, *ps, 0, t, &ctx);
+
+    if (ret < 0) {
+        int err;
+        GetOverlappedResult((HANDLE)*ps, &ctx.ov, &bytes, FALSE);
+        err = WSAGetLastError();
+        dprint("sendto: error 2\n");
+        socket_destroy(ps);
+        return err > 0 ? err : IO_UNKNOWN;
+    }
+    if (ret == 0) {
+        dprint("sendto: error 3\n");
+        socket_destroy(ps);
+        return IO_TIMEOUT;
+    }
+
+    GetOverlappedResult((HANDLE)*ps, &ctx.ov, &bytes, FALSE);
+    dprint("sendto: bytes:%u\n", bytes);
+    *sent = (size_t)bytes;
+
+    return IO_DONE;
+#else
     int err;
     *sent = 0;
     if (*ps == SOCKET_INVALID) return IO_CLOSED;
@@ -481,6 +547,7 @@ int socket_sendto(p_socket ps, const char *data, size_t count, size_t *sent,
         if ((err = socket_waitfd(ps, WAITFD_W, tm)) != IO_DONE) return err;
     } 
     return IO_UNKNOWN;
+#endif
 }
 
 /*-------------------------------------------------------------------------*\
@@ -566,6 +633,62 @@ int socket_recv(p_socket ps, char *data, size_t count, size_t *got, p_timeout tm
 \*-------------------------------------------------------------------------*/
 int socket_recvfrom(p_socket ps, char *data, size_t count, size_t *got, 
         SA *addr, socklen_t *len, p_timeout tm) {
+#if defined(SOCKET_SCHEDULER)
+    WSABUF buf;
+    DWORD flags = 0;
+    DWORD taken;
+    int err;
+    int ret, t;
+    struct wait_ctx ctx;
+    lua_State *L = lua_this();
+
+    *got = 0;
+    if (*ps == SOCKET_INVALID) return IO_CLOSED;
+
+    dprint("recv: ov:%p\n", &ctx.ov);
+
+    luaL_addfd(L, *ps);
+
+    buf.buf = data;
+    buf.len = count;
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    if (WSARecvFrom(*ps, &buf, 1, &taken, &flags, addr, len, (LPWSAOVERLAPPED)&ctx.ov, NULL)) {
+            err = WSAGetLastError();
+            if (err != WSA_IO_PENDING) {
+              dprint("recvfrom: error 1 err:%i\n", err);
+              socket_destroy(ps);
+              return err > 0 ? err : IO_UNKNOWN;
+            }
+    }
+
+    t = (int)(timeout_getretry(tm)*1e3);
+    ret = luaL_wait(L, *ps, 0, t, &ctx);
+
+    if (ret < 0) {
+        int err;
+        DWORD bytes;
+        GetOverlappedResult((HANDLE)*ps, &ctx.ov, &bytes, FALSE);
+        err = WSAGetLastError();
+        dprint("recvfrom: error 2\n");
+        socket_destroy(ps);
+        return err > 0 ? err : IO_UNKNOWN;
+    }
+    if (ret == 0) {
+        dprint("recvfrom: error 3\n");
+        socket_destroy(ps);
+        return IO_TIMEOUT;
+    }
+
+    GetOverlappedResult((HANDLE)*ps, &ctx.ov, &taken, FALSE);
+    dprint("recvfrom: taken:%u\n", taken);
+    if (taken == 0)
+      return IO_CLOSED;
+    *got = (size_t)taken;
+
+    return IO_DONE;
+#else
     int err;
     *got = 0;
     if (*ps == SOCKET_INVALID) return IO_CLOSED;
@@ -581,6 +704,7 @@ int socket_recvfrom(p_socket ps, char *data, size_t count, size_t *got,
         if ((err = socket_waitfd(ps, WAITFD_R, tm)) != IO_DONE) return err;
     }
     return IO_UNKNOWN;
+#endif
 }
 
 /*-------------------------------------------------------------------------*\

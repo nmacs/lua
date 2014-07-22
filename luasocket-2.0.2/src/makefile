@@ -52,6 +52,9 @@ UNIX_OBJS:=\
 	usocket.o \
 	unix.o
 
+WIN_OBJS:=\
+	wsocket.o
+
 all: $(SOCKET_SO) $(MIME_SO)
 
 $(SOCKET_A): $(SOCKET_OBJS)
@@ -96,7 +99,7 @@ usocket.o: usocket.c socket.h io.h timeout.h usocket.h
 
 clean:
 	rm -f $(SOCKET_SO) $(SOCKET_A) $(SOCKET_OBJS)
-	rm -f $(MIME_SO) $(UNIX_SO) $(MIME_OBJS) $(UNIX_OBJS)
+	rm -f $(MIME_SO) $(UNIX_SO) $(MIME_OBJS) $(UNIX_OBJS) $(WIN_OBJS)
 
 #------
 # End of makefile configuration

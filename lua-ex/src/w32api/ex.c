@@ -137,7 +137,7 @@ static FILE **new_file(lua_State *L, HANDLE h, int dmode, const char *mode)
   *pf = 0;
   luaL_getmetatable(L, LUA_FILEHANDLE);
   lua_setmetatable(L, -2);
-  *pf = _fdopen(_open_osfhandle((long)h, dmode), mode);
+  *pf = _fdopen(_open_osfhandle((intptr_t)h, dmode), mode);
   return pf;
 }
 
