@@ -1,3 +1,5 @@
+.EXPORT_ALL_VARIABLES:
+
 ifdef FOR_WINDOWS
 all:
 	$(MAKE) -C src/w32api libex.a

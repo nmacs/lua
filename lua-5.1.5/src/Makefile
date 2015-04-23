@@ -10,7 +10,7 @@ PLAT= none
 #CC= gcc
 CFLAGS += $(MYCFLAGS) $(COCOCFLAGS)
 #AR += rcu
-#RANLIB= ranlib
+RANLIB= ranlib
 RM= rm -f
 LIBS= -lm $(MYLIBS)
 

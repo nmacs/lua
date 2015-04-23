@@ -1,3 +1,5 @@
+.EXPORT_ALL_VARIABLES:
+
 ifndef HOSTBUILD
 LUA_STACK_SIZE    := 65536
 CFLAGS            += -Wl,-elf2flt="-s$(LUA_STACK_SIZE)"
@@ -39,7 +41,7 @@ LUA_INC           := "-I$(CURDIR)/$(LUA_DIR)/src"
 CFLAGS            += $(LUA_INC) -DAUTOCONF -DLUA_STATIC_MODULES -DCOCO_MIN_CSTACKSIZE=1024
 ifdef HOSTBUILD
 ifndef FOR_WINDOWS
-CFLAGS            += -DUSE_VALGRIND=1
+#CFLAGS            += -DUSE_VALGRIND=1
 endif
 CFLAGS            += -g
 endif
@@ -168,7 +170,7 @@ luabitstring: $(BITSTRING_DIR)/Makefile
 	$(MAKE) -C $(BITSTRING_DIR)
 
 $(BITSTRING_DIR)/Makefile: Makefile
-	cd $(BITSTRING_DIR) && ./configure --host=arm
+	cd $(BITSTRING_DIR) && ./configure --disable-shared --enable-static
 
 .PHONY: lsyslog
 lsyslog: $(LSYSLOG_DIR)/Makefile
